@@ -4,6 +4,7 @@
 package identity
 
 import (
+	"encoding/json"
 	"net"
 	"net/netip"
 	"testing"
@@ -14,6 +15,35 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/option"
 )
+
+func TestIPIdentityPairK8sMetadataJSONCompatibility(t *testing.T) {
+	pair := IPIdentityPair{
+		IP:           net.ParseIP("10.0.0.1"),
+		K8sNamespace: "default",
+		K8sPodName:   "echo",
+	}
+
+	withoutWorkload, err := pair.Marshal()
+	require.NoError(t, err)
+	assert.NotContains(t, string(withoutWorkload), "K8sWorkloadName")
+	assert.NotContains(t, string(withoutWorkload), "K8sWorkloadKind")
+
+	var decoded IPIdentityPair
+	require.NoError(t, json.Unmarshal(withoutWorkload, &decoded))
+	assert.Empty(t, decoded.K8sWorkloadName)
+	assert.Empty(t, decoded.K8sWorkloadKind)
+
+	pair.K8sWorkloadName = "echo"
+	pair.K8sWorkloadKind = "Deployment"
+	withWorkload, err := pair.Marshal()
+	require.NoError(t, err)
+	assert.Contains(t, string(withWorkload), `"K8sWorkloadName":"echo"`)
+	assert.Contains(t, string(withWorkload), `"K8sWorkloadKind":"Deployment"`)
+
+	require.NoError(t, json.Unmarshal(withWorkload, &decoded))
+	assert.Equal(t, pair.K8sWorkloadName, decoded.K8sWorkloadName)
+	assert.Equal(t, pair.K8sWorkloadKind, decoded.K8sWorkloadKind)
+}
 
 func TestReservedID(t *testing.T) {
 	i := GetReservedID("host")

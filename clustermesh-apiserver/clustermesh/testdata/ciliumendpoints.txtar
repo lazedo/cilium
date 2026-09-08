@@ -179,6 +179,9 @@ status:
     node: 172.18.0.2
   service-account: default
   state: ready
+  workload:
+    kind: Deployment
+    name: echo
 
 -- endpoint-3.yaml --
 apiVersion: cilium.io/v2
@@ -243,6 +246,8 @@ status:
   "Metadata": "",
   "K8sNamespace": "bar",
   "K8sPodName": "cep-002",
+  "K8sWorkloadName": "echo",
+  "K8sWorkloadKind": "Deployment",
   "K8sServiceAccount": "default",
   "NamedPorts": [
     {
@@ -279,6 +284,8 @@ status:
   "Metadata": "",
   "K8sNamespace": "bar",
   "K8sPodName": "cep-002",
+  "K8sWorkloadName": "echo",
+  "K8sWorkloadKind": "Deployment",
   "K8sServiceAccount": "default",
   "NamedPorts": [
     {
@@ -316,6 +323,8 @@ status:
   "Metadata": "",
   "K8sNamespace": "bar",
   "K8sPodName": "cep-002",
+  "K8sWorkloadName": "echo",
+  "K8sWorkloadKind": "Deployment",
   "K8sServiceAccount": "default",
   "NamedPorts": [
     {
@@ -340,6 +349,8 @@ status:
   "Metadata": "",
   "K8sNamespace": "bar",
   "K8sPodName": "cep-002",
+  "K8sWorkloadName": "echo",
+  "K8sWorkloadKind": "Deployment",
   "K8sServiceAccount": "default",
   "NamedPorts": [
     {
@@ -377,6 +388,8 @@ status:
   "Metadata": "",
   "K8sNamespace": "bar",
   "K8sPodName": "cep-002",
+  "K8sWorkloadName": "echo",
+  "K8sWorkloadKind": "Deployment",
   "K8sServiceAccount": "default",
   "NamedPorts": [
     {
@@ -413,6 +426,8 @@ status:
   "Metadata": "",
   "K8sNamespace": "bar",
   "K8sPodName": "cep-002",
+  "K8sWorkloadName": "echo",
+  "K8sWorkloadKind": "Deployment",
   "K8sServiceAccount": "default",
   "NamedPorts": [
     {

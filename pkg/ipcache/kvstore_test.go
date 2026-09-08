@@ -5,7 +5,9 @@ package ipcache
 
 import (
 	"context"
+	"encoding/json"
 	"net"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -30,10 +32,20 @@ type event struct {
 
 type fakeIPCache struct{ events chan event }
 type fakeBackend struct{ prefix string }
+type recordingKVStoreClient struct{ value []byte }
 
 func NewEvent(ev, ip string, source source.Source) event { return event{ev, ip, source, nil} }
 func NewFakeIPCache() *fakeIPCache                       { return &fakeIPCache{events: make(chan event)} }
 func NewFakeBackend() *fakeBackend                       { return &fakeBackend{} }
+
+func (c *recordingKVStoreClient) IsEnabled() bool { return true }
+
+func (c *recordingKVStoreClient) UpdateIfDifferent(_ context.Context, _ string, value []byte, _ bool) (bool, error) {
+	c.value = append(c.value[:0], value...)
+	return true, nil
+}
+
+func (c *recordingKVStoreClient) Delete(_ context.Context, _ string) error { return nil }
 
 func (m *fakeIPCache) Upsert(ip string, _ net.IP, _ uint8, k8sMeta *K8sMetadata, id Identity) (bool, error) {
 	m.events <- event{ev: "upsert", ip: ip, source: id.Source, k8sMeta: k8sMeta}
@@ -90,6 +102,28 @@ func eventually(in <-chan event) event {
 	case <-time.After(5 * time.Second):
 		return NewEvent("error", "timed out waiting for KV", source.Unspec)
 	}
+}
+
+func TestIPIdentitySynchronizerK8sMetadata(t *testing.T) {
+	client := &recordingKVStoreClient{}
+	synchronizer := &IPIdentitySynchronizer{
+		logger: hivetest.Logger(t),
+		client: client,
+	}
+
+	require.NoError(t, synchronizer.Upsert(t.Context(), &UpsertParams{
+		IP:              netip.MustParseAddr("10.0.0.1"),
+		HostIP:          netip.MustParseAddr("10.0.0.2"),
+		K8sNamespace:    "default",
+		K8sPodName:      "echo",
+		K8sWorkloadName: "echo",
+		K8sWorkloadKind: "Deployment",
+	}))
+
+	var pair identity.IPIdentityPair
+	require.NoError(t, json.Unmarshal(client.value, &pair))
+	require.Equal(t, "echo", pair.K8sWorkloadName)
+	require.Equal(t, "Deployment", pair.K8sWorkloadKind)
 }
 
 func TestIPIdentityWatcher(t *testing.T) {
@@ -203,7 +237,7 @@ func TestIdentityValidator(t *testing.T) {
 	}
 }
 
-func TestIPIdentityWatcherNamedPorts(t *testing.T) {
+func TestIPIdentityWatcherK8sMetadata(t *testing.T) {
 	const src = source.Source("foo")
 
 	ipcache := &fakeIPCache{events: make(chan event, 1)}
@@ -214,10 +248,12 @@ func TestIPIdentityWatcherNamedPorts(t *testing.T) {
 	}
 
 	watcher.OnUpdate(&identity.IPIdentityPair{
-		IP:           net.ParseIP("10.0.0.1"),
-		ID:           identity.NumericIdentity(1000),
-		K8sNamespace: "test-ns",
-		K8sPodName:   "echo-1",
+		IP:              net.ParseIP("10.0.0.1"),
+		ID:              identity.NumericIdentity(1000),
+		K8sNamespace:    "test-ns",
+		K8sPodName:      "echo-1",
+		K8sWorkloadName: "echo",
+		K8sWorkloadKind: "Deployment",
 		NamedPorts: []identity.NamedPort{
 			{Name: "http", Port: 8080, Protocol: "TCP"},
 			{Name: "dns", Port: 53, Protocol: "UDP"},
@@ -231,6 +267,7 @@ func TestIPIdentityWatcherNamedPorts(t *testing.T) {
 	require.NotNil(t, event.k8sMeta)
 	require.Equal(t, "test-ns", event.k8sMeta.Namespace)
 	require.Equal(t, "echo-1", event.k8sMeta.PodName)
+	require.Equal(t, &K8sWorkload{Name: "echo", Kind: "Deployment"}, event.k8sMeta.Workload)
 	require.Equal(t, types.NamedPortMap{
 		"http": {Proto: u8proto.TCP, Port: 8080},
 		"dns":  {Proto: u8proto.UDP, Port: 53},

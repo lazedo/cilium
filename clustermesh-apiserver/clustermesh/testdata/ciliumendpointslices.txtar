@@ -108,6 +108,9 @@ endpoints:
   id: 199475
   name: foo-002
   service-account: default
+  workload:
+    kind: Deployment
+    name: echo
   networking:
     addressing:
     - ipv4: 10.244.2.74
@@ -217,6 +220,8 @@ namespace: fred
   "Metadata": "",
   "K8sNamespace": "qux",
   "K8sPodName": "foo-002",
+  "K8sWorkloadName": "echo",
+  "K8sWorkloadKind": "Deployment",
   "K8sServiceAccount": "default"
 }
 # cilium/state/ip/v1/default/10.244.2.78
@@ -301,6 +306,8 @@ namespace: fred
   "Metadata": "",
   "K8sNamespace": "qux",
   "K8sPodName": "foo-002",
+  "K8sWorkloadName": "echo",
+  "K8sWorkloadKind": "Deployment",
   "K8sServiceAccount": "default"
 }
 # cilium/state/ip/v1/default/fd00:10:244:2::e4b4

@@ -244,6 +244,38 @@ func TestIPCache(t *testing.T) {
 	require.Empty(t, s.IPIdentityCache.identityToIPCache)
 }
 
+func TestK8sMetadataEqualIncludesWorkload(t *testing.T) {
+	metadata := &K8sMetadata{
+		Namespace: "default",
+		PodName:   "echo",
+		Workload:  &K8sWorkload{Name: "echo", Kind: "Deployment"},
+	}
+
+	require.True(t, metadata.Equal(&K8sMetadata{
+		Namespace: "default",
+		PodName:   "echo",
+		Workload:  &K8sWorkload{Name: "echo", Kind: "Deployment"},
+	}))
+	require.False(t, metadata.Equal(&K8sMetadata{
+		Namespace: "default",
+		PodName:   "echo",
+		Workload:  &K8sWorkload{Name: "other", Kind: "Deployment"},
+	}))
+	require.False(t, metadata.Equal(&K8sMetadata{
+		Namespace: "default",
+		PodName:   "echo",
+		Workload:  &K8sWorkload{Name: "echo", Kind: "StatefulSet"},
+	}))
+	require.False(t, metadata.Equal(&K8sMetadata{
+		Namespace: "default",
+		PodName:   "echo",
+	}))
+	require.False(t, (&K8sMetadata{
+		Namespace: "default",
+		PodName:   "echo",
+	}).Equal(metadata))
+}
+
 func TestIPCacheNamedPorts(t *testing.T) {
 	s := setupIPCacheTestSuite(t)
 	t.Parallel()
