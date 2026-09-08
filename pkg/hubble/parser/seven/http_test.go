@@ -72,6 +72,10 @@ func TestDecodeL7HTTPRequest(t *testing.T) {
 				return &ipcache.K8sMetadata{
 					Namespace: "default",
 					PodName:   "pod-1234",
+					Workload: &ipcache.K8sWorkload{
+						Name: "workload-1234",
+						Kind: "Deployment",
+					},
 				}
 			}
 			return nil
@@ -126,6 +130,7 @@ func TestDecodeL7HTTPRequest(t *testing.T) {
 	assert.Equal(t, fakeDestinationEndpoint.Labels.GetModel(), f.GetDestination().GetLabels())
 	assert.Equal(t, "default", f.GetDestination().GetNamespace())
 	assert.Equal(t, "pod-1234", f.GetDestination().GetPodName())
+	assert.Equal(t, []*flowpb.Workload{{Name: "workload-1234", Kind: "Deployment"}}, f.GetDestination().GetWorkloads())
 	assert.Equal(t, "default", f.GetDestinationService().GetNamespace())
 	assert.Equal(t, "service-1234", f.GetDestinationService().GetName())
 
@@ -187,6 +192,10 @@ func TestDecodeL7HTTPRecordResponse(t *testing.T) {
 				return &ipcache.K8sMetadata{
 					Namespace: "default",
 					PodName:   "pod-1234",
+					Workload: &ipcache.K8sWorkload{
+						Name: "workload-1234",
+						Kind: "Deployment",
+					},
 				}
 			}
 			return nil
@@ -241,6 +250,7 @@ func TestDecodeL7HTTPRecordResponse(t *testing.T) {
 	assert.Equal(t, fakeDestinationEndpoint.Labels.GetModel(), f.GetSource().GetLabels())
 	assert.Equal(t, "default", f.GetSource().GetNamespace())
 	assert.Equal(t, "pod-1234", f.GetSource().GetPodName())
+	assert.Equal(t, []*flowpb.Workload{{Name: "workload-1234", Kind: "Deployment"}}, f.GetSource().GetWorkloads())
 	assert.Equal(t, "default", f.GetSourceService().GetNamespace())
 	assert.Equal(t, "service-1234", f.GetSourceService().GetName())
 

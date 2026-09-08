@@ -110,6 +110,7 @@ func (p *Parser) Decode(r *accesslog.LogRecord, decoded *flowpb.Flow) error {
 	destinationIP, _ := netip.ParseAddr(ip.Destination)
 	var sourceNames, destinationNames []string
 	var sourceNamespace, sourcePod, destinationNamespace, destinationPod string
+	var sourceWorkloads, destinationWorkloads []*flowpb.Workload
 	if p.dnsGetter != nil {
 		sourceNames = p.dnsGetter.GetNamesOf(uint32(r.DestinationEndpoint.ID), sourceIP)
 		destinationNames = p.dnsGetter.GetNamesOf(uint32(r.SourceEndpoint.ID), destinationIP)
@@ -117,13 +118,21 @@ func (p *Parser) Decode(r *accesslog.LogRecord, decoded *flowpb.Flow) error {
 	if p.ipGetter != nil {
 		if meta := p.ipGetter.GetK8sMetadata(sourceIP); meta != nil {
 			sourceNamespace, sourcePod = meta.Namespace, meta.PodName
+			if meta.Workload != nil {
+				sourceWorkloads = []*flowpb.Workload{{Name: meta.Workload.Name, Kind: meta.Workload.Kind}}
+			}
 		}
 		if meta := p.ipGetter.GetK8sMetadata(destinationIP); meta != nil {
 			destinationNamespace, destinationPod = meta.Namespace, meta.PodName
+			if meta.Workload != nil {
+				destinationWorkloads = []*flowpb.Workload{{Name: meta.Workload.Name, Kind: meta.Workload.Kind}}
+			}
 		}
 	}
 	srcEndpoint := decodeEndpoint(r.SourceEndpoint, sourceNamespace, sourcePod)
 	dstEndpoint := decodeEndpoint(r.DestinationEndpoint, destinationNamespace, destinationPod)
+	srcEndpoint.Workloads = sourceWorkloads
+	dstEndpoint.Workloads = destinationWorkloads
 
 	if p.endpointGetter != nil {
 		p.updateEndpointWorkloads(sourceIP, srcEndpoint)
@@ -226,6 +235,9 @@ func (p *Parser) computeResponseTime(r *accesslog.LogRecord, timestamp time.Time
 func (p *Parser) updateEndpointWorkloads(ip netip.Addr, endpoint *flowpb.Endpoint) {
 	if ep, ok := p.endpointGetter.GetEndpointInfo(ip); ok {
 		if pod := ep.GetPod(); pod != nil {
+			// The local Pod is authoritative: drop the workload resolved from
+			// the IPCache before deriving it from the Pod.
+			endpoint.Workloads = nil
 			workload, workloadTypeMeta, ok := utils.GetWorkloadMetaFromPod(pod)
 			if ok {
 				endpoint.Workloads = []*flowpb.Workload{{Kind: workloadTypeMeta.Kind, Name: workload.Name}}

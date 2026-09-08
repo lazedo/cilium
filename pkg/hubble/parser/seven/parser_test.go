@@ -5,6 +5,7 @@ package seven
 
 import (
 	"net/http"
+	"net/netip"
 	"net/url"
 	"testing"
 
@@ -13,7 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
+	"github.com/cilium/cilium/pkg/hubble/parser/getters"
 	"github.com/cilium/cilium/pkg/hubble/testutils"
+	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
+	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/proxy/accesslog"
 	"github.com/cilium/cilium/pkg/u8proto"
@@ -125,4 +129,66 @@ func Test_decodeEndpoint(t *testing.T) {
 	}
 	ep := decodeEndpoint(epi, "kube-system", "hubble-ui")
 	assert.Equal(t, expected, ep)
+}
+
+func TestUpdateEndpointWorkloads(t *testing.T) {
+	ip := netip.MustParseAddr("10.0.0.1")
+	controller := true
+	ownedPod := &slim_corev1.Pod{ObjectMeta: slim_metav1.ObjectMeta{
+		GenerateName: "local-pod-",
+		OwnerReferences: []slim_metav1.OwnerReference{{
+			Kind:       "StatefulSet",
+			Name:       "local-workload",
+			Controller: &controller,
+		}},
+	}}
+	localWorkload := []*flowpb.Workload{{Kind: "StatefulSet", Name: "local-workload"}}
+	remoteWorkload := []*flowpb.Workload{{Kind: "Deployment", Name: "ipcache-workload"}}
+	tests := []struct {
+		name          string
+		localEndpoint bool
+		localPod      *slim_corev1.Pod
+		wantWorkloads []*flowpb.Workload
+	}{
+		{
+			name:          "local Pod workload replaces IPCache workload",
+			localEndpoint: true,
+			localPod:      ownedPod,
+			wantWorkloads: localWorkload,
+		},
+		{
+			name:          "ownerless local Pod clears IPCache workload",
+			localEndpoint: true,
+			localPod:      &slim_corev1.Pod{},
+		},
+		{
+			name:          "local endpoint without Pod keeps IPCache workload",
+			localEndpoint: true,
+			wantWorkloads: remoteWorkload,
+		},
+		{
+			name:          "remote endpoint keeps IPCache workload",
+			wantWorkloads: remoteWorkload,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpointGetter := &testutils.FakeEndpointGetter{
+				OnGetEndpointInfo: func(netip.Addr) (getters.EndpointInfo, bool) {
+					if !tt.localEndpoint {
+						return nil, false
+					}
+					return &testutils.FakeEndpointInfo{Pod: tt.localPod}, true
+				},
+			}
+			parser, err := New(hivetest.Logger(t), nil, nil, nil, endpointGetter)
+			require.NoError(t, err)
+			endpoint := &flowpb.Endpoint{Workloads: remoteWorkload}
+
+			parser.updateEndpointWorkloads(ip, endpoint)
+
+			assert.Equal(t, tt.wantWorkloads, endpoint.GetWorkloads())
+		})
+	}
 }
