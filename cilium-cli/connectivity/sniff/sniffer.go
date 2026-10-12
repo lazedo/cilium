@@ -242,13 +242,13 @@ func (sniffer *Sniffer) Validate(a *check.Action) {
 
 	if !strings.HasPrefix(count, "0 packets") && sniffer.mode == ModeAssert {
 		a.Failf("Captured unexpected packets (count=%s)", strings.TrimRight(count, "\n\r"))
-		a.Infof("Capture executed on %s (%s): %s", sniffer.target.String(), sniffer.target.NodeName(), strings.Join(sniffer.cmd, " "))
-		a.Infof("Captured packets:\n%s", sniffer.out.String())
+		a.Failf("Capture executed on %s (%s): %s", sniffer.target.String(), sniffer.target.NodeName(), strings.Join(sniffer.cmd, " "))
+		a.Failf("Captured packets:\n%s", sniffer.out.String())
 	}
 
 	if strings.HasPrefix(count, "0 packets") && sniffer.mode == ModeSanity {
-		a.Failf("Expected to capture packets, but none found. This check might be broken.")
-		a.Infof("Capture executed on %s (%s): %s", sniffer.target.String(), sniffer.target.NodeName(), strings.Join(sniffer.cmd, " "))
+		a.Failf("Expected to capture packets, but none found. This check might be broken")
+		a.Failf("Capture executed on %s (%s): %s", sniffer.target.String(), sniffer.target.NodeName(), strings.Join(sniffer.cmd, " "))
 	}
 }
 
