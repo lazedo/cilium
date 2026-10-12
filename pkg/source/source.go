@@ -46,6 +46,12 @@ const (
 	// locally on the node.
 	LocalAPI Source = "api"
 
+	// ClusterMeshVisibility is the source used for the frontends of services
+	// of remote clusters, attributed to the identity of their backends for
+	// visibility. It can be overwritten by all the sources describing actual
+	// endpoints, and overwrites only generated and restored state.
+	ClusterMeshVisibility Source = "clustermesh-visibility"
+
 	// Generated is the source used for generated state which can be
 	// overwritten by all other sources, except for restored (and unspec).
 	Generated Source = "generated"
@@ -77,6 +83,7 @@ var defaultSources Sources = []Source{
 	ClusterMesh,
 	Directory,
 	LocalAPI,
+	ClusterMeshVisibility,
 	Generated,
 	Restored,
 	Unspec,
