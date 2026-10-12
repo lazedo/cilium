@@ -20,7 +20,7 @@ env:
 jobs:
   check_changes:
     name: Deduce required tests from code changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       tested: ${{ steps.tested-tree.outputs.src }}
     steps:
@@ -45,7 +45,7 @@ jobs:
     name: K8s Network E2E tests
     needs: check_changes
     if: ${{ needs.check_changes.outputs.tested == 'true' }}
-    runs-on: ${{ vars.GH_RUNNER_EXTRA_POWER_UBUNTU_LATEST || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.GH_RUNNER_EXTRA_POWER_UBUNTU_LATEST || 'ubuntu-26.04' }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -341,7 +341,7 @@ jobs:
 
       - name: Upload cluster logs
         if: ${{ !success() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: "kind-logs-${{ matrix.ipFamily }}"
           path: ./_artifacts/logs
