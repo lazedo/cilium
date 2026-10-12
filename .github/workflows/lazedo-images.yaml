@@ -1,0 +1,128 @@
+# Builds the images of the house fork of Cilium and publishes them on GHCR.
+# Same shape as the other forks: one architecture per native runner, joined
+# by digest into a single manifest; tag = short commit SHA.
+# No tag trigger: v1.20.x-* tags would also start the upstream release
+# workflow (build-images-releases.yaml).
+name: lazedo-images
+
+on:
+  push:
+    branches:
+      - 'lazedo/**'
+  workflow_dispatch:
+
+concurrency:
+  group: lazedo-images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [cilium, operator-generic, clustermesh-apiserver]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - image: cilium
+            dockerfile: images/cilium/Dockerfile
+          - image: operator-generic
+            dockerfile: images/operator/Dockerfile
+          - image: clustermesh-apiserver
+            dockerfile: images/clustermesh-apiserver/Dockerfile
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: release
+          platforms: linux/${{ matrix.arch }}
+          provenance: false
+          build-args: |
+            OPERATOR_VARIANT=${{ matrix.image }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.image }}_${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest_${{ matrix.image }}_${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [cilium, operator-generic, clustermesh-apiserver]
+    steps:
+      - name: Short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest_${{ matrix.image }}_*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Create multi-arch manifest
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${{ github.repository_owner }}/${{ matrix.image }}"
+          # shellcheck disable=SC2046
+          docker buildx imagetools create -t "${IMAGE}:${{ steps.sha.outputs.short }}" \
+            $(for f in /tmp/digests/*; do echo "${IMAGE}@$(cat "$f")"; done)
+          docker buildx imagetools inspect "${IMAGE}:${{ steps.sha.outputs.short }}"
+          echo "\`${IMAGE}:${{ steps.sha.outputs.short }}\` (amd64+arm64)" >> "$GITHUB_STEP_SUMMARY"
