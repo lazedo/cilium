@@ -40,6 +40,7 @@ type Configuration struct {
 	common.Config
 	cmtypes.ServiceModeV2Config
 	wait.TimeoutConfig
+	ServiceVisibilityConfig
 
 	// ClusterInfo is the id/name of the local cluster.
 	ClusterInfo cmtypes.ClusterInfo
@@ -59,6 +60,10 @@ type Configuration struct {
 	RemoteIdentityWatcher RemoteIdentityWatcher
 
 	IPCache ipcache.IPCacher
+
+	// ServiceVisibilityIPCache, if not nil, is used to attribute the frontends
+	// of the services that remote clusters export for visibility.
+	ServiceVisibilityIPCache ServiceVisibilityIPCache `optional:"true"`
 
 	// ClusterSizeDependantInterval allows to calculate intervals based on cluster size.
 	ClusterSizeDependantInterval kvstore.ClusterSizeDependantIntervalFunc
@@ -119,6 +124,10 @@ type ClusterMesh struct {
 	// is protected by its own mutex inside the structure.
 	globalServices *common.GlobalServiceCache
 
+	// visibility attributes the frontends of the services that remote clusters
+	// export for visibility. It is nil when disabled.
+	visibility *serviceVisibility
+
 	// syncTimeoutLogOnce ensures that the warning message triggered upon failure
 	// waiting for remote clusters synchronization is output only once.
 	syncTimeoutLogOnce sync.Once
@@ -162,6 +171,11 @@ func NewClusterMesh(lifecycle cell.Lifecycle, c Configuration) *ClusterMesh {
 		Metrics: c.CommonMetrics,
 	})
 
+	if c.ClusterMeshServiceVisibility && c.ServiceVisibilityIPCache != nil {
+		cm.visibility = newServiceVisibility(c.Logger, c.ServiceVisibilityIPCache)
+		lifecycle.Append(cm.visibility)
+	}
+
 	lifecycle.Append(cm.common)
 	return cm
 }
@@ -193,6 +207,16 @@ func (cm *ClusterMesh) NewRemoteCluster(name string, status common.StatusFunc) c
 		store.RWSWithEntriesMetric(cm.conf.Metrics.TotalNodes.WithLabelValues(rc.name)),
 	)
 
+	servicesObserver := common.NewSharedServicesObserver(
+		rc.log,
+		cm.globalServices,
+		cm.conf.ServiceMerger.MergeExternalServiceUpdate,
+		cm.conf.ServiceMerger.MergeExternalServiceDelete,
+	)
+	if cm.visibility != nil {
+		servicesObserver = &serviceVisibilityObserver{shared: servicesObserver, visibility: cm.visibility}
+	}
+
 	rc.remoteServices = cm.conf.StoreFactory.NewWatchStore(
 		name,
 		serviceStore.KeyCreator(
@@ -200,12 +224,7 @@ func (cm *ClusterMesh) NewRemoteCluster(name string, status common.StatusFunc) c
 			serviceStore.NamespacedNameValidator(),
 			serviceStore.ClusterIDValidator(&rc.clusterID),
 		),
-		common.NewSharedServicesObserver(
-			rc.log,
-			cm.globalServices,
-			cm.conf.ServiceMerger.MergeExternalServiceUpdate,
-			cm.conf.ServiceMerger.MergeExternalServiceDelete,
-		),
+		servicesObserver,
 		store.RWSWithOnSyncCallback(func(ctx context.Context) { rc.synced.services.Stop() }),
 		store.RWSWithEntriesMetric(cm.conf.Metrics.TotalServices.WithLabelValues(rc.name)),
 	)
