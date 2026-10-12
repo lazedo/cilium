@@ -1,0 +1,179 @@
+#! --cluster-id=3 --cluster-name=cluster3
+
+hive/start
+
+k8s/add namespace.yaml
+
+# 1. A service which is not shared is exported for visibility only, with the
+# addresses of its load balancer as additional frontends.
+k8s/add service.yaml endpointslice.yaml
+
+kvstore/list -o json cilium/state/services services.actual
+* cmp services.actual services-visibility.expected
+
+# 2. Sharing the service exports it as a global service, without the
+# addresses of its load balancer.
+sed 'placeholder: "true"' 'service.cilium.io/global: "true"' service.yaml
+k8s/update service.yaml
+
+kvstore/list -o json cilium/state/services services.actual
+* cmp services.actual services-global.expected
+
+# 3. Not sharing it anymore exports it for visibility only again.
+sed 'service.cilium.io/global: "true"' 'placeholder: "true"' service.yaml
+k8s/update service.yaml
+
+kvstore/list -o json cilium/state/services services.actual
+* cmp services.actual services-visibility.expected
+
+# 4. A headless service has no frontends to attribute: it is not exported.
+k8s/add headless.yaml
+
+kvstore/list -o json cilium/state/services services.actual
+* cmp services.actual services-visibility.expected
+
+# 5. Removing the service removes its visibility entry.
+k8s/delete service.yaml
+
+kvstore/list -o json cilium/state/services services.actual
+* empty services.actual
+
+# ----
+
+-- namespace.yaml --
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test
+
+-- service.yaml --
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: test
+  annotations:
+    placeholder: "true"
+spec:
+  clusterIP: 10.96.50.104
+  clusterIPs:
+  - 10.96.50.104
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    name: echo
+  type: LoadBalancer
+status:
+  loadBalancer:
+    ingress:
+    - ip: 172.18.255.200
+
+-- headless.yaml --
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-headless
+  namespace: test
+spec:
+  clusterIP: None
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    name: echo
+  type: ClusterIP
+
+-- endpointslice.yaml --
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  labels:
+    kubernetes.io/service-name: echo
+  name: echo-kvlm2
+  namespace: test
+addressType: IPv4
+endpoints:
+- addresses:
+  - 10.244.1.1
+  conditions:
+    ready: true
+    serving: true
+    terminating: false
+  nodeName: nodeport-worker
+ports:
+- name: http
+  port: 8080
+  protocol: TCP
+
+-- services-visibility.expected --
+# cilium/state/services/v1/cluster3/test/echo
+{
+  "cluster": "cluster3",
+  "namespace": "test",
+  "name": "echo",
+  "frontends": {
+    "10.96.50.104": {
+      "http": {
+        "Protocol": "TCP",
+        "Port": 80
+      }
+    },
+    "172.18.255.200": {
+      "http": {
+        "Protocol": "TCP",
+        "Port": 80
+      }
+    }
+  },
+  "backends": {
+    "10.244.1.1": {
+      "http": {
+        "Protocol": "TCP",
+        "Port": 8080
+      }
+    }
+  },
+  "labels": {},
+  "selector": {
+    "name": "echo"
+  },
+  "includeExternal": false,
+  "shared": false,
+  "clusterID": 3,
+  "visibilityOnly": true
+}
+-- services-global.expected --
+# cilium/state/services/v1/cluster3/test/echo
+{
+  "cluster": "cluster3",
+  "namespace": "test",
+  "name": "echo",
+  "frontends": {
+    "10.96.50.104": {
+      "http": {
+        "Protocol": "TCP",
+        "Port": 80
+      }
+    }
+  },
+  "backends": {
+    "10.244.1.1": {
+      "http": {
+        "Protocol": "TCP",
+        "Port": 8080
+      }
+    }
+  },
+  "labels": {},
+  "selector": {
+    "name": "echo"
+  },
+  "includeExternal": true,
+  "shared": true,
+  "clusterID": 3
+}

@@ -1,4 +1,4 @@
-#! --cluster-id=3 --cluster-name=cluster3 --clustermesh-default-global-namespace=false
+#! --cluster-id=3 --cluster-name=cluster3 --clustermesh-default-global-namespace=false --clustermesh-service-visibility=false
 
 hive/start
 

@@ -86,6 +86,12 @@ type ClusterService struct {
 
 	// ClusterID is the cluster ID the service is configured in
 	ClusterID uint32 `json:"clusterID"`
+
+	// VisibilityOnly is true when the service is exported only so that
+	// other clusters attribute its frontends to the identity of its backends.
+	// Such a service is never shared: other clusters do not load-balance to
+	// its backends.
+	VisibilityOnly bool `json:"visibilityOnly,omitempty"`
 }
 
 func (s *ClusterService) String() string {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
+	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
@@ -41,12 +42,34 @@ type ServiceSyncConfig struct {
 	Synced func(context.Context)
 }
 
+// ServiceVisibilityConfig configures the export of the services which are not
+// shared with remote clusters.
+type ServiceVisibilityConfig struct {
+	// ClusterMeshServiceVisibility exports the services which are not shared as
+	// visibility-only entries, so that remote clusters attribute their frontends
+	// to the identity of their backends without load-balancing to them.
+	ClusterMeshServiceVisibility bool `mapstructure:"clustermesh-service-visibility"`
+}
+
+// DefaultServiceVisibilityConfig exports the services for visibility unless
+// opted out.
+var DefaultServiceVisibilityConfig = ServiceVisibilityConfig{
+	ClusterMeshServiceVisibility: true,
+}
+
+func (def ServiceVisibilityConfig) Flags(flags *pflag.FlagSet) {
+	flags.Bool("clustermesh-service-visibility", def.ClusterMeshServiceVisibility,
+		"Export the services which are not shared with remote clusters for visibility only, "+
+			"so that remote clusters attribute their frontends to the identity of their backends")
+}
+
 // ServiceSyncCell implements synchronization of Kubernetes services and endpoints
 // to kvstore.
 var ServiceSyncCell = cell.Module(
 	"service-sync",
 	"Synchronizes Kubernetes services to KVStore",
 
+	cell.Config(DefaultServiceVisibilityConfig),
 	cell.Invoke(registerServiceSync),
 	cell.Provide(newClusterServiceConverter),
 )
@@ -283,11 +306,13 @@ type DefaultClusterServiceConverter struct {
 	log              *slog.Logger
 	cinfo            cmtypes.ClusterInfo
 	namespaceManager cmnamespace.Manager
+	visibility       bool
 }
 
 // Convert implements ClusterServiceConverter.
 func (d DefaultClusterServiceConverter) Convert(k8sService *slim_corev1.Service, getEndpointSlices func(namespace, name string) []*slim_discovery_v1.EndpointSlice) (out *serviceStore.ClusterService, toUpsert bool, err error) {
-	if shared := annotation.GetAnnotationShared(k8sService); !shared {
+	shared := annotation.GetAnnotationShared(k8sService)
+	if !shared && !d.visibility {
 		return d.ForDeletion(k8sService), false, nil
 	}
 
@@ -300,11 +325,20 @@ func (d DefaultClusterServiceConverter) Convert(k8sService *slim_corev1.Service,
 		return d.ForDeletion(k8sService), false, nil
 	}
 
+	// A service which is not shared is exported for visibility only: remote
+	// clusters attribute its frontends to the identity of its backends, but
+	// never load-balance to them. Without frontends there is nothing to export.
+	visibilityOnly := !shared
+	if visibilityOnly && (isHeadless(k8sService) || k8sService.Spec.Type == slim_corev1.ServiceTypeExternalName) {
+		return d.ForDeletion(k8sService), false, nil
+	}
+
 	svc := serviceStore.NewClusterService(k8sService.Name, k8sService.Namespace)
 	svc.Cluster = d.cinfo.Name
 	svc.ClusterID = d.cinfo.ID
-	svc.Shared = true
-	svc.IncludeExternal = true
+	svc.Shared = shared
+	svc.IncludeExternal = shared
+	svc.VisibilityOnly = visibilityOnly
 	maps.Copy(svc.Labels, k8sService.Labels)
 	maps.Copy(svc.Selector, k8sService.Spec.Selector)
 
@@ -321,6 +355,15 @@ func (d DefaultClusterServiceConverter) Convert(k8sService *slim_corev1.Service,
 		}
 		for _, feIP := range clusterIPs {
 			svc.Frontends[feIP] = portConfig
+		}
+		if visibilityOnly {
+			// Pods of remote clusters may also reach the service through the
+			// addresses its load balancer announces.
+			for _, ingress := range k8sService.Status.LoadBalancer.Ingress {
+				if ingress.IP != "" {
+					svc.Frontends[ingress.IP] = portConfig
+				}
+			}
 		}
 	}
 
@@ -364,6 +407,11 @@ func (d DefaultClusterServiceConverter) ForDeletion(k8sService *slim_corev1.Serv
 
 var _ ClusterServiceConverter = DefaultClusterServiceConverter{}
 
-func newClusterServiceConverter(log *slog.Logger, cinfo cmtypes.ClusterInfo, nsMgr cmnamespace.Manager) ClusterServiceConverter {
-	return DefaultClusterServiceConverter{log: log, cinfo: cinfo, namespaceManager: nsMgr}
+func newClusterServiceConverter(log *slog.Logger, cinfo cmtypes.ClusterInfo, nsMgr cmnamespace.Manager, cfg ServiceVisibilityConfig) ClusterServiceConverter {
+	return DefaultClusterServiceConverter{
+		log:              log,
+		cinfo:            cinfo,
+		namespaceManager: nsMgr,
+		visibility:       cfg.ClusterMeshServiceVisibility,
+	}
 }
